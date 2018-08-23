@@ -1671,6 +1671,9 @@ struct uv_loop_s {
 
 UV_EXTERN void* uv_loop_get_data(const uv_loop_t*);
 UV_EXTERN void uv_loop_set_data(uv_loop_t*, void* data);
+#ifdef _WIN32
+UV_EXTERN int uv_win_set_gui_data(uv_loop_t* loop, HWND hWnd, UINT uMsg);
+#endif // _WIN32
 
 /* Don't export the private CPP symbols. */
 #undef UV_HANDLE_TYPE_PRIVATE

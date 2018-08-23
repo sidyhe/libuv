@@ -287,6 +287,9 @@ int uv_loop_init(uv_loop_t* loop) {
   if (err)
     goto fail_async_init;
 
+  loop->gui_handle = NULL;
+  loop->gui_message = 0;
+
   return 0;
 
 fail_async_init:
@@ -432,6 +435,71 @@ static void uv__poll_wine(uv_loop_t* loop, DWORD timeout) {
 }
 
 
+typedef struct
+{
+	HANDLE CompletionPort;
+	LPOVERLAPPED_ENTRY lpCompletionPortEntries;
+	ULONG ulCount;
+	PULONG ulNumEntriesRemoved;
+	DWORD dwMilliseconds;
+	BOOL fAlertable;
+
+	HWND gui_handle;
+	UINT gui_message;
+} uv_gui_work_data_t;
+
+
+static DWORD WINAPI UvIocpUserWork(LPVOID args)
+{
+	BOOL result;
+	uv_gui_work_data_t* ugwd = (uv_gui_work_data_t*)args;
+
+	result = GetQueuedCompletionStatusEx(ugwd->CompletionPort, ugwd->lpCompletionPortEntries, ugwd->ulCount, ugwd->ulNumEntriesRemoved, ugwd->dwMilliseconds, ugwd->fAlertable);
+	PostMessage(ugwd->gui_handle, ugwd->gui_message, 0, result);
+	return 0;
+}
+
+
+static BOOL UvGetQueuedCompletionStatusEx(uv_loop_t* loop, LPOVERLAPPED_ENTRY lpCompletionPortEntries, ULONG ulCount, PULONG ulNumEntriesRemoved, DWORD dwMilliseconds, BOOL fAlertable)
+{
+	if ((dwMilliseconds != 0) && IsWindow(loop->gui_handle))
+	{
+		uv_gui_work_data_t ugwd;
+
+		ugwd.CompletionPort = loop->iocp;
+		ugwd.lpCompletionPortEntries = lpCompletionPortEntries;
+		ugwd.ulCount = ulCount;
+		ugwd.ulNumEntriesRemoved = ulNumEntriesRemoved;
+		ugwd.dwMilliseconds = dwMilliseconds;
+		ugwd.fAlertable = fAlertable;
+
+		ugwd.gui_handle = loop->gui_handle;
+		ugwd.gui_message = loop->gui_message;
+
+		if (QueueUserWorkItem(&UvIocpUserWork, &ugwd, WT_EXECUTEDEFAULT))
+		{
+			MSG msg;
+
+			while (1)
+			{
+				if (!GetMessage(&msg, NULL, 0, 0))
+					continue; // ignore WM_QUIT !!!
+
+				if ((msg.hwnd == loop->gui_handle) && (msg.message == loop->gui_message))
+				{
+					return (msg.lParam != 0);
+				}
+
+				TranslateMessage(&msg);
+				DispatchMessage(&msg);
+			}
+		}
+	}
+
+	return GetQueuedCompletionStatusEx(loop->iocp, lpCompletionPortEntries, ulCount, ulNumEntriesRemoved, dwMilliseconds, fAlertable);
+}
+
+
 static void uv__poll(uv_loop_t* loop, DWORD timeout) {
   BOOL success;
   uv_req_t* req;
@@ -444,7 +512,7 @@ static void uv__poll(uv_loop_t* loop, DWORD timeout) {
   timeout_time = loop->time + timeout;
 
   for (repeat = 0; ; repeat++) {
-    success = GetQueuedCompletionStatusEx(loop->iocp,
+    success = UvGetQueuedCompletionStatusEx(loop,
                                           overlappeds,
                                           ARRAY_SIZE(overlappeds),
                                           &count,
@@ -649,4 +717,12 @@ int uv__getsockpeername(const uv_handle_t* handle,
     return uv_translate_sys_error(WSAGetLastError());
 
   return 0;
+}
+
+int uv_win_set_gui_data(uv_loop_t* loop, HWND hWnd, UINT uMsg)
+{
+	loop->gui_handle = hWnd;
+	loop->gui_message = uMsg;
+
+	return 0;
 }

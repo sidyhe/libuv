@@ -357,7 +357,9 @@ typedef struct {
   /* Threadpool */                                                            \
   void* wq[2];                                                                \
   uv_mutex_t wq_mutex;                                                        \
-  uv_async_t wq_async;
+  uv_async_t wq_async;                                                        \
+  HWND gui_handle;                                                            \
+  UINT gui_message;                                                           \
 
 #define UV_REQ_TYPE_PRIVATE                                                   \
   /* TODO: remove the req suffix */                                           \
