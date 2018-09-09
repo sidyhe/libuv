@@ -455,7 +455,7 @@ static DWORD WINAPI UvIocpUserWork(LPVOID args)
 	uv_gui_work_data_t* ugwd = (uv_gui_work_data_t*)args;
 
 	result = GetQueuedCompletionStatusEx(ugwd->CompletionPort, ugwd->lpCompletionPortEntries, ugwd->ulCount, ugwd->ulNumEntriesRemoved, ugwd->dwMilliseconds, ugwd->fAlertable);
-	PostMessage(ugwd->gui_handle, ugwd->gui_message, 0, result);
+	PostMessage(ugwd->gui_handle, ugwd->gui_message, GetLastError(), result);
 	return 0;
 }
 
@@ -487,6 +487,9 @@ static BOOL UvGetQueuedCompletionStatusEx(uv_loop_t* loop, LPOVERLAPPED_ENTRY lp
 
 				if ((msg.hwnd == loop->gui_handle) && (msg.message == loop->gui_message))
 				{
+					DWORD err = (DWORD)msg.wParam;
+
+					SetLastError(err);
 					return (msg.lParam != 0);
 				}
 
@@ -571,14 +574,19 @@ int uv_loop_alive(const uv_loop_t* loop) {
 }
 
 
-int uv_run(uv_loop_t *loop, uv_run_mode mode) {
+int uv__run(uv_loop_t *loop, uv_run_mode mode, uint32_t milliseconds) {
   DWORD timeout;
   int r;
   int ran_pending;
+  uint64_t stop_time = 0;
 
   r = uv__loop_alive(loop);
   if (!r)
     uv_update_time(loop);
+
+  if (mode == UV_RUN_DEFAULT && milliseconds > 0) {
+	  stop_time = uv_now(loop) + milliseconds;
+  }
 
   while (r != 0 && loop->stop_flag == 0) {
     uv_update_time(loop);
@@ -591,6 +599,17 @@ int uv_run(uv_loop_t *loop, uv_run_mode mode) {
     timeout = 0;
     if ((mode == UV_RUN_ONCE && !ran_pending) || mode == UV_RUN_DEFAULT)
       timeout = uv_backend_timeout(loop);
+
+	if (stop_time > 0) {
+		uint64_t cur_time = uv_now(loop);
+
+		if (cur_time >= stop_time) {
+			timeout = 0;
+			mode = UV_RUN_ONCE;
+		} else {
+			timeout = (DWORD)(stop_time - cur_time);
+		}
+	}
 
     if (pGetQueuedCompletionStatusEx)
       uv__poll(loop, timeout);
@@ -625,6 +644,16 @@ int uv_run(uv_loop_t *loop, uv_run_mode mode) {
     loop->stop_flag = 0;
 
   return r;
+}
+
+
+int uv_run(uv_loop_t *loop, uv_run_mode mode) {
+    return uv__run(loop, mode, 0);
+}
+
+
+int uv_run_timeout(uv_loop_t* loop, uint32_t milliseconds) {
+    return uv__run(loop, UV_RUN_DEFAULT, milliseconds);
 }
 
 

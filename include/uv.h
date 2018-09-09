@@ -282,6 +282,9 @@ UV_EXTERN int uv_loop_configure(uv_loop_t* loop, uv_loop_option option, ...);
 UV_EXTERN int uv_loop_fork(uv_loop_t* loop);
 
 UV_EXTERN int uv_run(uv_loop_t*, uv_run_mode mode);
+#ifdef _WIN32
+UV_EXTERN int uv_run_timeout(uv_loop_t*, uint32_t milliseconds);
+#endif // _WIN32
 UV_EXTERN void uv_stop(uv_loop_t*);
 
 UV_EXTERN void uv_ref(uv_handle_t*);
